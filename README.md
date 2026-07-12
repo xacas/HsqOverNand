@@ -30,6 +30,7 @@ HSQソース(.hsq) → hsq → SUBLEQコード(.sq) → subleq(インタプリ�
 ```sh
 make            # subleq, nandServer, simpleClient
 make hsq        # Higher Subleq コンパイラ
+                # (オリジナルのhsq.cppを取得→SHA256検証→64bitパッチ適用→ビルド。要ネットワーク)
 
 ./run.sh        # nandsim をロードして nandServer を起動 (要 sudo)
                 # 実機 NAND の場合は /dev/mtd0 をそのまま使う
@@ -63,7 +64,7 @@ g++ -O2 -DNAND_STUB -Iinclude src/server/ROM.cpp src/server/cpu.cpp \
 | `src/subleq/` | SUBLEQインタプリタ(減算をnandServerへオフロード) |
 | `src/client/` | simpleClient: 減算の回帰テスト |
 | `include/` | 共有ヘッダ(ROM/CPU/NANDインタフェース/MTD) |
-| `hsq.cpp` | Higher Subleq コンパイラ(64bit拡張版) |
+| `hsq64.patch` | Higher Subleq コンパイラを64bit化するパッチ(本体はビルド時取得) |
 | `hsq_src/`, `test/` | HSQサンプルとテストハーネス |
 | `hw/` | 回路図(キャリー先見加算器) |
 
@@ -72,7 +73,14 @@ g++ -O2 -DNAND_STUB -Iinclude src/server/ROM.cpp src/server/cpu.cpp \
 1 命令 ≈ 1ms (UDP往復 + 36回のページプログラム)。`printf("%d")` の除算ループは
 命令数が膨大になるため、大きな数の印字は実機では分〜時間単位かかる。
 
-## クレジット
+## ライセンスとクレジット
 
-`hsq.cpp` は Oleg Mazonka 氏の [Higher Subleq](http://mazonka.com/subleq/)
-(2009-2011) を 64bit 対応に改修したもの。
+このリポジトリのコードは [MITライセンス](LICENSE)。
+
+Higher Subleq コンパイラ (hsq.cpp) は Oleg Mazonka 氏の著作物
+([オリジナルサイト](http://mazonka.com/subleq/)、2009-2011)で、ライセンスが
+公表されていないため**このリポジトリでは再配布していない**。リポジトリに
+含まれるのは当方の64bit化改変分 `hsq64.patch`(MIT)のみで、`make hsq` が
+オリジナルを公開アーカイブ([Wayback Machine](https://web.archive.org/web/20211207033118/http://mazonka.com/subleq/hsq.cpp)
+/ [GitHubミラー](https://github.com/8l/hsq))から取得し、SHA256検証のうえ
+ローカルでパッチを適用する。

@@ -36,6 +36,20 @@ $(SUBLEQ): $(SUBLEQ_OBJ_FILES)
 $(CLIENT): $(CLIENT_OBJ_FILES)
 	$(CXX) $(CLIENT_OBJ_FILES) -o $(CLIENT)
 
+# hsqのオリジナル(Oleg Mazonka氏作、ライセンス未公表)は再配布しない。
+# ビルド時に取得してチェックサム検証し、64bit化パッチ(hsq64.patch)を適用する。
+HSQ_ORIG_URL = https://web.archive.org/web/20211207033118/http://mazonka.com/subleq/hsq.cpp
+HSQ_ORIG_URL2 = https://raw.githubusercontent.com/8l/hsq/master/hsq.cpp
+HSQ_ORIG_SHA256 = 462c210ae200fbe7780ad5b8b8adced28d37ff5697a8af806e12bbe23c32d751
+
+hsq_orig.cpp:
+	curl -fsSL "$(HSQ_ORIG_URL)" -o $@ || curl -fsSL "$(HSQ_ORIG_URL2)" -o $@
+	echo "$(HSQ_ORIG_SHA256)  $@" | sha256sum -c -
+
+hsq.cpp: hsq_orig.cpp hsq64.patch
+	tr -d '\r' < hsq_orig.cpp > $@
+	patch $@ hsq64.patch
+
 $(HSQ): hsq.cpp
 	$(CXX) $(CXXFLAGS) hsq.cpp -o $(HSQ)
 
