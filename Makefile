@@ -73,10 +73,40 @@ $(SERVER_BUILD_DIR):
 $(CLIENT_BUILD_DIR):
 	mkdir -p $(CLIENT_BUILD_DIR)
 
+# RP1 PIOによるW25N02KV直接制御 (SPI-NAND HAT ver.4)
+CC = gcc
+PIOLIB_DIR = vendor/piolib
+PIOLIB_SRC = $(PIOLIB_DIR)/piolib.c $(PIOLIB_DIR)/library_piochips.c $(PIOLIB_DIR)/pio_rp1.c
+QSPI_CFLAGS = -Wall -O2 -I$(PIOLIB_DIR)/include -Isrc/qspi -DLIBRARY_BUILD=1
+
+qspiTest: src/qspi/test_jedec.c src/qspi/w25n_pio.c $(PIOLIB_SRC)
+	$(CC) $(QSPI_CFLAGS) $^ -o $@
+
+qspiPageTest: src/qspi/test_page.c src/qspi/w25n_pio.c $(PIOLIB_SRC)
+	$(CC) $(QSPI_CFLAGS) $^ -o $@
+
+qspiSpeedTest: src/qspi/test_speed.c src/qspi/w25n_pio.c $(PIOLIB_SRC)
+	$(CC) $(QSPI_CFLAGS) $^ -o $@
+
+qspiQuadTest: src/qspi/test_quad.c src/qspi/w25n_pio.c $(PIOLIB_SRC)
+	$(CC) $(QSPI_CFLAGS) $^ -o $@
+
+# デバッグ用: PIOファームウェアの生存確認(全ioctlがETIMEDOUTなら要再起動)
+pioProbe: src/qspi/pio_probe.c
+	$(CC) $(QSPI_CFLAGS) $^ -o $@
+
+# デバッグ用: シフト閾値切り替えがSM_INITで効くかの実験
+dbgShiftCfg: src/qspi/dbg_shiftcfg.c $(PIOLIB_SRC)
+	$(CC) $(QSPI_CFLAGS) $^ -o $@
+
+# デバッグ用: バルクRXのFIFOポーリング/DMA比較 (ループバック、フラッシュ非使用)
+dbgRxBulk: src/qspi/dbg_rxbulk.c $(PIOLIB_SRC)
+	$(CC) $(QSPI_CFLAGS) $^ -o $@
+
 # クリーンアップ
 clean:
 	rm -rf $(BUILD_DIR)
-	rm -f $(TARGET)
+	rm -f $(TARGET) qspiTest qspiPageTest qspiSpeedTest qspiQuadTest pioProbe dbgShiftCfg dbgRxBulk
 
 # フォースターゲット指定
 .PHONY: all clean

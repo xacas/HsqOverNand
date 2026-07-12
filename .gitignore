@@ -8,6 +8,15 @@ build/
 /simpleClient
 /hsq
 
+# SPI-NAND HAT (RP1 PIO) テスト・デバッグバイナリ
+/qspiTest
+/qspiPageTest
+/qspiSpeedTest
+/qspiQuadTest
+/pioProbe
+/dbgShiftCfg
+/dbgRxBulk
+
 # hsqはビルド時に取得+パッチ適用で生成される(オリジナルは再配布しない)
 /hsq.cpp
 /hsq_orig.cpp
