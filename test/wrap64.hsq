@@ -1,0 +1,9 @@
+int printf(int s);
+
+int main()
+{
+	int big = 4611686018427387904;
+	if( big + big < 0 ) printf("neg\n");
+	else printf("pos\n");
+	return 0;
+}

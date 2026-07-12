@@ -1,0 +1,26 @@
+int printf(int s);
+
+int main()
+{
+	int a = 1234567890123456789;
+	int b = 987654321;
+	int big, neg;
+
+	printf("Hello 64bit SUBLEQ!\n");
+	printf("a   = %d\n", a);
+	printf("a+b = %d\n", a + b);
+	printf("a-b = %d\n", a - b);
+	printf("b*3 = %d\n", b * 3);
+	printf("a/b = %d\n", a / b);
+	printf("a%%b = %d\n", a % b);
+
+	big = 4611686018427387904;
+	if( big + big < 0 ) printf("wrap ok\n");
+
+	neg = -9223372036854775807;
+	printf("neg = %d\n", neg);
+	if( neg < 0 ) printf("neg<0 ok\n");
+	if( a > b ) printf("a>b ok\n");
+
+	return 0;
+}

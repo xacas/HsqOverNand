@@ -1,0 +1,12 @@
+# ビルド生成物
+build/
+*.o
+
+# 実行バイナリ
+/subleq
+/nandServer
+/simpleClient
+/hsq
+
+# ローカル設定
+.claude/

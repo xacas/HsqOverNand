@@ -1,0 +1,513 @@
+void putchar(int a);
+int printf(char * a);
+int puts(char * a);
+int getchar();
+
+int debug = 0;
+int raw_data[] = "\n  abcdefgh\n1 ........\n2 ........\n3 ........\n4 ........\n5 ........\n6 ........\n7 ........\n8 ........\n\n";
+int *board[64];
+int rewards[8];
+int candidate[60];
+int index_of_candidate[64];
+
+int BLACK = 88;
+int WHITE = 79;
+
+int direction[8];
+
+int turn_num = 0;
+int skip_count = 0;
+
+void debug_print(char *msg)
+{
+  if(debug == 1)
+  {
+    puts(msg);
+  }
+}
+
+void init()
+{
+  direction[0] = 7;   //upper right
+  direction[1] = -1;  //right
+  direction[2] = -9;  //lower right
+  direction[3] = 8;   //upper
+  direction[4] = -8;  //lower
+  direction[5] = -7;   //lower left
+  direction[6] = 1;   //left
+  direction[7] = 9;   //upper left
+
+  board[0]  = &raw_data[14];
+  board[1]  = &raw_data[15];
+  board[2]  = &raw_data[16];
+  board[3]  = &raw_data[17];
+  board[4]  = &raw_data[18];
+  board[5]  = &raw_data[19];
+  board[6]  = &raw_data[20];
+  board[7]  = &raw_data[21];
+  board[8]  = &raw_data[25];
+  board[9]  = &raw_data[26];
+  board[10] = &raw_data[27];
+  board[11] = &raw_data[28];
+  board[12] = &raw_data[29];
+  board[13] = &raw_data[30];
+  board[14] = &raw_data[31];
+  board[15] = &raw_data[32];
+  board[16] = &raw_data[36];
+  board[17] = &raw_data[37];
+  board[18] = &raw_data[38];
+  board[19] = &raw_data[39];
+  board[20] = &raw_data[40];
+  board[21] = &raw_data[41];
+  board[22] = &raw_data[42];
+  board[23] = &raw_data[43];
+  board[24] = &raw_data[47];
+  board[25] = &raw_data[48];
+  board[26] = &raw_data[49];
+  board[27] = &raw_data[50];
+  board[28] = &raw_data[51];
+  board[29] = &raw_data[52];
+  board[30] = &raw_data[53];
+  board[31] = &raw_data[54];
+  board[32] = &raw_data[58];
+  board[33] = &raw_data[59];
+  board[34] = &raw_data[60];
+  board[35] = &raw_data[61];
+  board[36] = &raw_data[62];
+  board[37] = &raw_data[63];
+  board[38] = &raw_data[64];
+  board[39] = &raw_data[65];
+  board[40] = &raw_data[69];
+  board[41] = &raw_data[70];
+  board[42] = &raw_data[71];
+  board[43] = &raw_data[72];
+  board[44] = &raw_data[73];
+  board[45] = &raw_data[74];
+  board[46] = &raw_data[75];
+  board[47] = &raw_data[76];
+  board[48] = &raw_data[80];
+  board[49] = &raw_data[81];
+  board[50] = &raw_data[82];
+  board[51] = &raw_data[83];
+  board[52] = &raw_data[84];
+  board[53] = &raw_data[85];
+  board[54] = &raw_data[86];
+  board[55] = &raw_data[87];
+  board[56] = &raw_data[91];
+  board[57] = &raw_data[92];
+  board[58] = &raw_data[93];
+  board[59] = &raw_data[94];
+  board[60] = &raw_data[95];
+  board[61] = &raw_data[96];
+  board[62] = &raw_data[97];
+  board[63] = &raw_data[98];
+
+  candidate[0] = 0;
+  candidate[1] = 7;
+  candidate[2] = 56;
+  candidate[3] = 63;
+  candidate[4] = 1;
+  candidate[5] = 6;
+  candidate[6] = 8;
+  candidate[7] = 15;
+  candidate[8] = 48;
+  candidate[9] = 55;
+  candidate[10] = 57;
+  candidate[11] = 62;
+  candidate[12] = 2;
+  candidate[13] = 5;
+  candidate[14] = 16;
+  candidate[15] = 23;
+  candidate[16] = 40;
+  candidate[17] = 47;
+  candidate[18] = 58;
+  candidate[19] = 61;
+  candidate[20] = 3;
+  candidate[21] = 4;
+  candidate[22] = 24;
+  candidate[23] = 31;
+  candidate[24] = 32;
+  candidate[25] = 39;
+  candidate[26] = 59;
+  candidate[27] = 60;
+  candidate[28] = 19;
+  candidate[29] = 20;
+  candidate[30] = 26;
+  candidate[31] = 29;
+  candidate[32] = 34;
+  candidate[33] = 37;
+  candidate[34] = 43;
+  candidate[35] = 44;
+  candidate[36] = 11;
+  candidate[37] = 12;
+  candidate[38] = 25;
+  candidate[39] = 30;
+  candidate[40] = 33;
+  candidate[41] = 38;
+  candidate[42] = 51;
+  candidate[43] = 52;
+  candidate[44] = 10;
+  candidate[45] = 13;
+  candidate[46] = 17;
+  candidate[47] = 22;
+  candidate[48] = 41;
+  candidate[49] = 46;
+  candidate[50] = 50;
+  candidate[51] = 53;
+  candidate[52] = 18;
+  candidate[53] = 21;
+  candidate[54] = 42;
+  candidate[55] = 45;
+  candidate[56] = 9;
+  candidate[57] = 14;
+  candidate[58] = 49;
+  candidate[59] = 54;
+
+  index_of_candidate[0] = 0;
+  index_of_candidate[1] = 4;
+  index_of_candidate[2] = 12;
+  index_of_candidate[3] = 20;
+  index_of_candidate[4] = 21;
+  index_of_candidate[5] = 13;
+  index_of_candidate[6] = 5;
+  index_of_candidate[7] = 1;
+  index_of_candidate[8] = 6;
+  index_of_candidate[9] = 56;
+  index_of_candidate[10] = 44;
+  index_of_candidate[11] = 36;
+  index_of_candidate[12] = 37;
+  index_of_candidate[13] = 45;
+  index_of_candidate[14] = 57;
+  index_of_candidate[15] = 7;
+  index_of_candidate[16] = 14;
+  index_of_candidate[17] = 46;
+  index_of_candidate[18] = 52;
+  index_of_candidate[19] = 28;
+  index_of_candidate[20] = 29;
+  index_of_candidate[21] = 53;
+  index_of_candidate[22] = 47;
+  index_of_candidate[23] = 15;
+  index_of_candidate[24] = 22;
+  index_of_candidate[25] = 38;
+  index_of_candidate[26] = 30;
+  index_of_candidate[27] = -1;
+  index_of_candidate[28] = -1;
+  index_of_candidate[29] = 31;
+  index_of_candidate[30] = 39;
+  index_of_candidate[31] = 23;
+  index_of_candidate[32] = 24;
+  index_of_candidate[33] = 40;
+  index_of_candidate[34] = 32;
+  index_of_candidate[35] = -1;
+  index_of_candidate[36] = -1;
+  index_of_candidate[37] = 33;
+  index_of_candidate[38] = 41;
+  index_of_candidate[39] = 25;
+  index_of_candidate[40] = 16;
+  index_of_candidate[41] = 48;
+  index_of_candidate[42] = 54;
+  index_of_candidate[43] = 34;
+  index_of_candidate[44] = 35;
+  index_of_candidate[45] = 55;
+  index_of_candidate[46] = 49;
+  index_of_candidate[47] = 17;
+  index_of_candidate[48] = 8;
+  index_of_candidate[49] = 58;
+  index_of_candidate[50] = 50;
+  index_of_candidate[51] = 42;
+  index_of_candidate[52] = 43;
+  index_of_candidate[53] = 51;
+  index_of_candidate[54] = 59;
+  index_of_candidate[55] = 9;
+  index_of_candidate[56] = 2;
+  index_of_candidate[57] = 10;
+  index_of_candidate[58] = 18;
+  index_of_candidate[59] = 26;
+  index_of_candidate[60] = 27;
+  index_of_candidate[61] = 19;
+  index_of_candidate[62] = 11;
+  index_of_candidate[63] = 3;
+}
+
+void setupGame()
+{
+  *board[27] = 79;
+  *board[28] = 88;
+  *board[35] = 88;
+  *board[36] = 79;
+}
+
+void draw()
+{
+  puts(raw_data);
+}
+
+int isEmptyPosition(int num)
+{
+  //printf("isEmptyPosition %d\n", num);
+  if(*board[num] == 46)
+  {
+    return 1;
+  }
+  return 0;
+}
+
+int isBlackPosition(int num)
+{
+  if(*board[num] == 88)
+  {
+    return 1;
+  }
+  return 0;
+}
+
+int isWhitePosition(int num)
+{
+  if(*board[num] == 79)
+  {
+    return 1;
+  }
+  return 0;
+}
+
+int isBoundary(int num, int arrow)
+{
+  //左方向の境界値チェック
+  if(((num % 8) == 0) && (4 < arrow))
+  {
+    return 1;
+  }
+  //右方向の境界値チェック
+  else if(((num % 8) == 7) && (arrow < 3))
+  {
+    return 1;
+  }
+  return 0;
+}
+
+int evaluate_direction(int isBlack, int num, int arrow)
+{
+  //printf("num : %d, arrow : %d\n", num, arrow);
+  int reward = 0;
+
+  if(isBoundary(num, arrow))
+  {
+    //debug_print("境界値に引っ掛かりました\n");
+    return 0;
+  }
+
+  for(int i = num - direction[arrow]; (0 <= i) && (i < 64); i -= direction[arrow])
+  {
+    if(isEmptyPosition(i))
+    {
+        //debug_print("この先には何もないや\n");
+        return 0;
+    }
+    if(isBlack)
+    {
+      if(isBlackPosition(i))
+      {
+        //debug_print("置けるかも\n");
+        return reward;
+      }
+      else
+      {
+        //debug_print("ひっくり返せるかな。。");
+        reward++;
+      }
+    }
+    else
+    {
+      if(isWhitePosition(i))
+      {
+        //debug_print("置けるかも\n");
+        return reward;
+      }
+      else
+      {
+        //debug_print("ひっくり返せるかな。。");
+        reward++;
+      }
+    }// isBlack
+    if(isBoundary(i, arrow))
+    {
+      //debug_print("境界値に引っ掛かりました\n");
+      return 0;
+    }
+  }
+  return 0;
+}
+
+int evaluate(int isBlack, int num)
+{
+  int reward = 0;
+
+  for(int i = 0; i < 8; i++)
+  {
+    rewards[i] = evaluate_direction(isBlack, num, i);
+    reward += rewards[i];
+  }
+
+  return reward;
+}
+
+int isValidPositionExist(int isBlack)
+{
+  if(turn_num < 8)
+  {
+    turn_num++;
+    return 1;
+  }
+  for(int i = 0; i < 60; i++)
+  {
+    if(candidate[i] < 64)
+    {
+      if(evaluate(isBlack, candidate[i]))
+      {
+        turn_num++;
+        return 1;
+      }
+    }
+  }
+  return 0;
+}
+
+int reverse(int isBlack, int num, int direction_num, int reward)
+{
+  for(int i = 0; i <= reward; i++)
+  {
+    if(isBlack)
+    {
+      *board[num] = 88;
+    }
+    else
+    {
+      *board[num] = 79;
+    }
+    num -= direction_num;
+  }
+}
+
+void execute(int isBlack, int num)
+{
+  if(num < 64)
+  {
+    skip_count = 0;
+    for(int i = 0; i < 8; i++)
+    {
+      //reward[i] が 0 の時は何もせず抜ける。
+      reverse(isBlack, num, direction[i], rewards[i]);
+    }
+  }
+}
+
+int selectPosition(int isBlack)
+{
+  if(isBlack)
+  {
+    puts("X : 黒の番です");
+  }
+  else
+  {
+    puts("O : 白の番です");
+  }
+
+  if(!isValidPositionExist(isBlack))
+  {
+    puts("\n石を置ける場所が無いのでスキップします。");
+    skip_count++;
+    return 255;
+  }
+
+  while(1)
+  {
+    draw();
+    puts("石を置く位置 : ");
+    int x = getchar();
+    int y = getchar();
+    getchar();//drop pressed enter key.
+    if((48 < y) && (y < 58) && (96 < x) && (x < 105))
+    {
+      printf("あなたが選んだ位置 : %c%c\n", x, y);
+      int num = (y - 49) * 8 + (x - 97);
+      if(isEmptyPosition(num))
+      {
+        if(evaluate(isBlack, num))
+        {
+          candidate[index_of_candidate[num]] = 255;
+          return num;
+        }
+        else
+        {
+          puts("あなたはそこに石を置けません。\n");
+          return -1;
+        }
+      }
+      else
+      {
+        puts("そこは既に石が置いてあります。\n");
+      }
+    }
+    else
+    {
+      printf("無効な座標です。もう一度選んでください\n");
+      return -1;
+    }
+  }
+}
+
+int judge(int isBlack)
+{
+  int num = 0;
+  int expectedVal = (isBlack)? 88 : 79;
+  for(int i = 0; i < 64; i++)
+  {
+    if(*board[i] == expectedVal)
+    {
+      num++;
+    }
+  }
+  return num;
+}
+
+void main()
+{
+  int num, black_reward = 0, white_reward = 0;
+  int isBlack = 1;
+  init();
+  setupGame();
+  while(turn_num < 60)
+  {
+    num = selectPosition(isBlack);
+    if(num < 0)
+    {
+      return 0;
+    }
+    if(1 < skip_count)
+    {
+      break;
+    }
+    execute(isBlack, num);
+    isBlack = 1 - isBlack;
+  }
+
+  black_reward = judge(1);
+  white_reward = judge(0);
+  printf("黒 : %d 枚、白 : %d 枚 \n", black_reward, white_reward);
+
+  if(black_reward == white_reward)
+  {
+    puts("引き分け！！\n");
+    draw();
+  }
+  else if(white_reward < black_reward)
+  {
+    puts("あなた（X : 黒）の勝ち！！\n");
+    draw();
+  }
+  else
+  {
+    puts("あなた（X : 黒）の負け..\n");
+    draw();
+  }
+}

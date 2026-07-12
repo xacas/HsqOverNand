@@ -1,0 +1,13 @@
+int printf(int s);
+
+int main()
+{
+	int a = 6, b = 7;
+	printf("Hi 64bit!\n");
+	printf("6*7=%d\n", a * b);
+	printf("100/7=%d\n", 100 / 7);
+	printf("100%%7=%d\n", 100 % 7);
+	if( a < b ) printf("6<7 ok\n");
+	if( 0 - a < 0 ) printf("-6<0 ok\n");
+	return 0;
+}

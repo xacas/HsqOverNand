@@ -1,0 +1,62 @@
+#include <iostream>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <cstring>
+
+struct Request {
+    int32_t a;
+    int32_t b;
+};
+
+struct Response {
+    int32_t c;
+    bool is_jmp;
+};
+
+Response flashClient(Request req) {
+    int sock = 0;
+    struct sockaddr_in serv_addr;
+    
+    // ソケット作成
+    if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+        std::cout << "Socket creation error" << std::endl;
+        exit(1);
+    }
+    
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(8080);
+    
+    // IPv4アドレス変換
+    if (inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr) <= 0) {
+        std::cout << "Invalid address/ Address not supported" << std::endl;
+        exit(1);
+    }
+    
+    // サーバーに接続
+    if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+        std::cout << "Connection Failed" << std::endl;
+        exit(1);
+    }
+    Response resp;
+    
+    // データ送信
+    send(sock, &req, sizeof(req), 0);
+    //std::cout << "データを送信しました: a=" << req.a << ", b=" << req.b << std::endl;
+    
+    // 結果受信
+    ssize_t bytes_received = recv(sock, &resp, sizeof(resp), 0);
+
+    if (bytes_received == sizeof(resp)) {
+        #if 0
+        std::cout << "結果を受信しました:" << std::endl;
+        std::cout << "c = b - a = " << resp.c << std::endl;
+        std::cout << "c <= 0 ? " << (resp.is_jmp ? "true" : "false") << std::endl;
+        #endif
+    } else {
+        std::cout << "結果の受信に失敗しました" << std::endl;
+    }
+
+    close(sock);
+    return resp;
+}
