@@ -4,9 +4,13 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <cstring>
+#include <cerrno>
 #include <thread>
 #include <atomic>
 #include <chrono>
+#include <vector>
+#include <memory>
+#include <mutex>
 #include <gtk/gtk.h>
 #include <gdk-pixbuf/gdk-pixbuf.h>
 #include "cpu.hpp"
@@ -204,6 +208,8 @@ namespace Server {
     // 1ラウンド(1回のNANDプログラムシーケンス)にLANES件まで相乗りさせる。
     // 相乗り相手を待つ最大時間。1ラウンドのフラッシュ時間より十分小さくする
     constexpr int BATCH_WAIT_US = 500;
+    // 接続するフラッシュデバイス(/dev/mtd0..3)の最大数。1デバイス=1CPU=1ワーカー
+    constexpr int MAX_MTD = 4;
 
     struct Pending {
         Request req;
@@ -211,32 +217,77 @@ namespace Server {
         socklen_t len;
     };
 
-    static bool same_endpoint(const sockaddr_in& x, const sockaddr_in& y) {
-        return x.sin_addr.s_addr == y.sin_addr.s_addr && x.sin_port == y.sin_port;
-    }
+    // ワーカー = 1個のフラッシュデバイスを占有するCPU
+    struct Worker {
+        int id = 0;
+        CPU* cpu = nullptr;
+    };
 
-    void process_requests(int server_fd, CPU& cpu) {
-        // 別クライアントの活動を最近見たときだけ相乗り待ちする(単独クライアントを遅くしない)
-        static struct sockaddr_in last_addr;
-        static bool have_last = false;
-        static std::chrono::steady_clock::time_point multi_until;
+    // 直近1秒のアクティブクライアント数を全ワーカー共有で数える。
+    // クライアント数が「CPU数」を超えるときだけ相乗り待ちする
+    // (超えていなければ各クライアントは別CPUで並列処理でき、待ちは純粋な損)
+    class ClientTracker {
+        static constexpr int MAXC = 32;
+        std::mutex mu;
+        struct Ent {
+            uint64_t key;
+            std::chrono::steady_clock::time_point seen;
+        } ent[MAXC] = {};
+        int n = 0;
+    public:
+        // クライアントの活動を記録し、現在のアクティブ数を返す
+        int touch(const sockaddr_in& a) {
+            const uint64_t key = ((uint64_t)a.sin_addr.s_addr << 16) | a.sin_port;
+            const auto now = std::chrono::steady_clock::now();
+            std::lock_guard<std::mutex> lk(mu);
+            int active = 0;
+            int slot = -1;
+            bool found = false;
+            for (int i = 0; i < n; i++) {
+                if (ent[i].key == key) {
+                    ent[i].seen = now;
+                    found = true;
+                }
+                if (now - ent[i].seen < std::chrono::seconds(1)) {
+                    active++;
+                } else if (slot < 0) {
+                    slot = i;   // 期限切れスロットは再利用できる
+                }
+            }
+            if (!found) {
+                if (slot < 0 && n < MAXC) {
+                    slot = n++;
+                }
+                if (slot >= 0) {
+                    ent[slot] = {key, now};
+                }
+                active++;
+            }
+            return active;
+        }
+    };
+
+    ClientTracker g_clients;
+    int g_num_cpus = 1;
+
+    void process_requests(int server_fd, Worker& w) {
+        CPU& cpu = *w.cpu;
 
         Pending p[LANES];
         p[0].len = sizeof(p[0].addr);
-        ssize_t bytes_received = recvfrom(server_fd, &p[0].req, sizeof(Request), 0,
+        // 全ワーカーが同一ソケットを共有するため非ブロッキングで取る
+        // (selectで起きても他ワーカーが先に取っていることがある)
+        ssize_t bytes_received = recvfrom(server_fd, &p[0].req, sizeof(Request), MSG_DONTWAIT,
                                          (struct sockaddr*)&p[0].addr, &p[0].len);
+        if (bytes_received < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            return;
+        }
         if (bytes_received != sizeof(Request)) {
             std::cout << "データ受信エラー: 受信サイズ " << bytes_received << " bytes" << std::endl;
             return;
         }
         int n = 1;
-
-        auto now = std::chrono::steady_clock::now();
-        if (have_last && !same_endpoint(p[0].addr, last_addr)) {
-            multi_until = now + std::chrono::seconds(1);
-        }
-        last_addr = p[0].addr;
-        have_last = true;
+        int active = g_clients.touch(p[0].addr);
 
         bool current_isboost = g_state.isboost.load();
 
@@ -247,13 +298,14 @@ namespace Server {
                 ssize_t r = recvfrom(server_fd, &p[n].req, sizeof(Request), MSG_DONTWAIT,
                                      (struct sockaddr*)&p[n].addr, &p[n].len);
                 if (r != sizeof(Request)) break;
-                multi_until = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+                active = g_clients.touch(p[n].addr);
                 n++;
             }
-            // 複数クライアントが活動中なら、少しだけ相乗りを待つ
+            // クライアント数がCPU数を超えている(=CPUを分け合うしかない)ときだけ、
+            // 少しだけ相乗り相手を待つ。CPU数以下なら別CPUで並列処理できるので待たない
             auto deadline = std::chrono::steady_clock::now()
                             + std::chrono::microseconds(BATCH_WAIT_US);
-            while (n < LANES && std::chrono::steady_clock::now() < multi_until) {
+            while (n < LANES && active > g_num_cpus) {
                 auto remain = std::chrono::duration_cast<std::chrono::microseconds>(
                                 deadline - std::chrono::steady_clock::now()).count();
                 if (remain <= 0) break;
@@ -267,7 +319,10 @@ namespace Server {
                 p[n].len = sizeof(p[n].addr);
                 ssize_t r = recvfrom(server_fd, &p[n].req, sizeof(Request), MSG_DONTWAIT,
                                      (struct sockaddr*)&p[n].addr, &p[n].len);
-                if (r == sizeof(Request)) n++;
+                if (r == sizeof(Request)) {
+                    active = g_clients.touch(p[n].addr);
+                    n++;
+                }
             }
         }
 
@@ -298,8 +353,8 @@ namespace Server {
         }
 
         for (int i = 0; i < n; i++) {
-            printf("受信[%d/%d]: a = %20ld, b = %20ld, 計算: c = %20ld, c <= 0 ? : %s\n",
-                   i + 1, n, p[i].req.a, p[i].req.b, resp[i].c,
+            printf("CPU%d 受信[%d/%d]: a = %20ld, b = %20ld, 計算: c = %20ld, c <= 0 ? : %s\n",
+                   w.id, i + 1, n, p[i].req.a, p[i].req.b, resp[i].c,
                    (resp[i].is_non_positive) ? "true" : "false");
             ssize_t bytes_sent = sendto(server_fd, &resp[i], sizeof(Response), 0,
                                        (struct sockaddr*)&p[i].addr, p[i].len);
@@ -309,11 +364,55 @@ namespace Server {
         }
     }
     
+    // 1ワーカー = 1フラッシュデバイス。全員が同じUDPソケットからリクエストを取る
+    void worker_func(int server_fd, Worker* w) {
+        while (g_state.server_running.load()) {
+            fd_set readfds;
+            struct timeval timeout;
+            FD_ZERO(&readfds);
+            FD_SET(server_fd, &readfds);
+            timeout.tv_sec = 1;
+            timeout.tv_usec = 0;
+
+            int activity = select(server_fd + 1, &readfds, NULL, NULL, &timeout);
+            if (activity < 0) {
+                if (g_state.server_running.load()) {
+                    perror("select error");
+                }
+                break;
+            } else if (activity == 0) {
+                continue; // タイムアウト
+            }
+            if (FD_ISSET(server_fd, &readfds)) {
+                process_requests(server_fd, *w);
+            }
+        }
+    }
+
     void thread_func() {
         int server_fd;
         struct sockaddr_in server_addr;
-        CPU cpu;
-        
+
+        // 接続されているフラッシュデバイス(/dev/mtd0..3)を検出し、
+        // 1デバイスにつき1CPUを立ち上げる(初期化はROM生成の共有状態のため逐次)
+        std::vector<std::unique_ptr<CPU>> cpus;
+        for (int i = 0; i < MAX_MTD; i++) {
+            char dev[16];
+            snprintf(dev, sizeof(dev), "/dev/mtd%d", i);
+            if (access(dev, F_OK) != 0) {
+                break;
+            }
+            printf("CPU%d: %s を初期化中...\n", i, dev);
+            cpus.emplace_back(new CPU(dev));
+        }
+        if (cpus.empty()) {
+            printf("フラッシュデバイスが見つかりません\n");
+            return;
+        }
+        g_num_cpus = (int)cpus.size();
+        printf("%zu CPU (最大 %zu 並列減算) でサーバを開始します\n",
+               cpus.size(), cpus.size() * LANES);
+
         // UDPソケット初期化
         if ((server_fd = socket(AF_INET, SOCK_DGRAM, 0)) == 0) {
             perror("UDP socket failed");
@@ -345,30 +444,18 @@ namespace Server {
             return G_SOURCE_REMOVE;
         }, nullptr);
         
-        // メインループ（UDP版）
-        while (g_state.server_running.load()) {
-            fd_set readfds;
-            struct timeval timeout;
-            FD_ZERO(&readfds);
-            FD_SET(server_fd, &readfds);
-            timeout.tv_sec = 1;
-            timeout.tv_usec = 0;
-            
-            int activity = select(server_fd + 1, &readfds, NULL, NULL, &timeout);
-            if (activity < 0) {
-                if (g_state.server_running.load()) {
-                    perror("select error");
-                }
-                break;
-            } else if (activity == 0) {
-                continue; // タイムアウト
-            }
-            
-            if (FD_ISSET(server_fd, &readfds)) {
-                process_requests(server_fd, cpu);
-            }
+        // CPU毎のワーカースレッドを起動して待つ
+        std::vector<Worker> workers(cpus.size());
+        std::vector<std::thread> worker_threads;
+        for (size_t i = 0; i < cpus.size(); i++) {
+            workers[i].id = (int)i;
+            workers[i].cpu = cpus[i].get();
+            worker_threads.emplace_back(worker_func, server_fd, &workers[i]);
         }
-        
+        for (auto& t : worker_threads) {
+            t.join();
+        }
+
         close(server_fd);
         g_state.server_running.store(false);
         

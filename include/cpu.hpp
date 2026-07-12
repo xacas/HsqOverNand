@@ -10,7 +10,9 @@
 class CPU
 {
     public:
-        CPU(void)
+        // devはこのCPUが占有するフラッシュデバイス(1デバイス=1CPU)
+        CPU(const char* dev = "/dev/mtd0")
+         : nand(dev)
         {
             //init ROM
             romAddr = 0;
@@ -55,8 +57,8 @@ class CPU
             // 全容量を使い切ったときだけブロック消去する
             nandSize = nand.size();
             erase();
-            printf("wear-leveling: nand=%u MB, %u pages/erase-cycle\n",
-                   nandSize >> 20, (nandSize - RAM) / PAGE_SIZ);
+            printf("%s: wear-leveling nand=%u MB, %u pages/erase-cycle\n",
+                   dev, nandSize >> 20, (nandSize - RAM) / PAGE_SIZ);
         };
         ROM_t fetch(void);
         void execute(ROM_t rom);
@@ -76,6 +78,7 @@ class CPU
         uint32_t rom_size;
         uint32_t getinCnt = 0;	// GET_INのレーン判別カウンタ(CAP_INでリセット)
         uint32_t pageOffset = 0;	// 計算ページの現在の物理オフセット(RAM起点)
+        uint32_t preOffset = 0;	// edit_bufのページ切替検出用(CPU毎に独立)
         uint32_t nandSize;
         // 計算領域(RAM以降)のROMアドレスを、ウェアレベリング先の物理アドレスへ変換
         uint32_t phys(uint32_t addr) { return (addr >= RAM) ? addr + pageOffset : addr; }

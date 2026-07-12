@@ -57,7 +57,6 @@ void CPU::edit_buf(uint32_t addr, uint8_t value)
 {
     DEBUG_PRINT("edit_buf %05x, %02x\n", addr, value);
     uint32_t offset = (phys(addr) / PAGE_SIZ) * PAGE_SIZ;
-    static uint32_t preOffset = 0;
     if(offset != preOffset)
     {
         DEBUG_PRINT("offset = %x, preOffset = %x\n", offset, preOffset);

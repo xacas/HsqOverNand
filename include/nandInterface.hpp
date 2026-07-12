@@ -12,6 +12,7 @@ class nandInterface {
     private:
         std::vector<uint8_t> mem = std::vector<uint8_t>(1 << 20, 0xff);
     public:
+        nandInterface(const char* = "") {}
         bool erase(uint32_t offset, uint32_t length)
         {
             memset(&mem[offset], 0xff, length);
@@ -46,7 +47,7 @@ class nandInterface {
 
 class nandInterface {
     private:
-        MTDFlashDevice mtd = {"/dev/mtd0"};
+        MTDFlashDevice mtd;
 #ifdef LED
         bool ledOk = false;
         unsigned int ledRead = 2;
@@ -63,29 +64,36 @@ class nandInterface {
 #endif
         }
     public:
-        nandInterface()
+        nandInterface(const char* dev = "/dev/mtd0") : mtd(dev)
         {
             if (!mtd.open()) {
                 exit(1);
             }
 #ifdef LED
+            // GPIO初期化は全デバイス(CPU)で共有する(LEDピンは共通の稼働表示)。
             // GPIOが無い環境(非Raspberry Pi)ではLED表示だけ諦めて続行する
-            if(gpiolib_init() < 0 || gpiolib_mmap() < 0){
-                printf("gpiolib unavailable, running without LEDs\n");
-            } else {
-                gpio_set_fsel(ledRead, GPIO_FSEL_OUTPUT);
-                gpio_set_pull(ledRead, PULL_NONE);
-                gpio_set_drive(ledRead, DRIVE_LOW);
+            static bool gpioTried = false;
+            static bool gpioAvail = false;
+            if(!gpioTried){
+                gpioTried = true;
+                if(gpiolib_init() < 0 || gpiolib_mmap() < 0){
+                    printf("gpiolib unavailable, running without LEDs\n");
+                } else {
+                    gpio_set_fsel(ledRead, GPIO_FSEL_OUTPUT);
+                    gpio_set_pull(ledRead, PULL_NONE);
+                    gpio_set_drive(ledRead, DRIVE_LOW);
 
-                gpio_set_fsel(ledWrite, GPIO_FSEL_OUTPUT);
-                gpio_set_pull(ledWrite, PULL_NONE);
-                gpio_set_drive(ledWrite, DRIVE_LOW);
+                    gpio_set_fsel(ledWrite, GPIO_FSEL_OUTPUT);
+                    gpio_set_pull(ledWrite, PULL_NONE);
+                    gpio_set_drive(ledWrite, DRIVE_LOW);
 
-                gpio_set_fsel(ledErase, GPIO_FSEL_OUTPUT);
-                gpio_set_pull(ledErase, PULL_NONE);
-                gpio_set_drive(ledErase, DRIVE_LOW);
-                ledOk = true;
+                    gpio_set_fsel(ledErase, GPIO_FSEL_OUTPUT);
+                    gpio_set_pull(ledErase, PULL_NONE);
+                    gpio_set_drive(ledErase, DRIVE_LOW);
+                    gpioAvail = true;
+                }
             }
+            ledOk = gpioAvail;
 #endif
         }
         ~nandInterface()
