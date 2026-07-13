@@ -1,7 +1,13 @@
 # 変数定義
 CXX = g++
-CXXFLAGS = -Wall -Iinclude -std=c++14 -Ofast -I/usr/local/include -O3
+# -MMD -MP: ヘッダ依存(.d)を生成し、ヘッダ変更時に.oを再ビルドさせる
+CXXFLAGS = -Wall -Iinclude -Isrc/qspi -std=c++14 -Ofast -I/usr/local/include -O3 -MMD -MP
 LIBS = `pkg-config --libs gtk+-3.0` -lpthread
+
+# SPI-NAND HAT用のPIOドライバ(C)。nandServerにリンクする
+QSPI_OBJ_DIR = build/qspi
+QSPI_OBJS = $(QSPI_OBJ_DIR)/w25n_pio.o $(QSPI_OBJ_DIR)/piolib.o \
+            $(QSPI_OBJ_DIR)/library_piochips.o $(QSPI_OBJ_DIR)/pio_rp1.o
 SUBLEQ_SRC_DIR = src/subleq
 SERVER_SRC_DIR = src/server
 CLIENT_SRC_DIR = src/client
@@ -27,8 +33,8 @@ CLIENT_OBJ_FILES = $(patsubst $(CLIENT_SRC_DIR)/%.cpp, $(CLIENT_BUILD_DIR)/%.o, 
 all: $(TARGET)
 
 # ターゲットのリンク
-$(SERVER): $(SERVER_OBJ_FILES)
-	$(CXX) $(SERVER_OBJ_FILES) -o $(SERVER) $(LIBS)
+$(SERVER): $(SERVER_OBJ_FILES) $(QSPI_OBJS)
+	$(CXX) $(SERVER_OBJ_FILES) $(QSPI_OBJS) -o $(SERVER) $(LIBS)
 
 $(SUBLEQ): $(SUBLEQ_OBJ_FILES)
 	$(CXX) $(SUBLEQ_OBJ_FILES) -o $(SUBLEQ)
@@ -79,6 +85,16 @@ PIOLIB_DIR = vendor/piolib
 PIOLIB_SRC = $(PIOLIB_DIR)/piolib.c $(PIOLIB_DIR)/library_piochips.c $(PIOLIB_DIR)/pio_rp1.c
 QSPI_CFLAGS = -Wall -O2 -I$(PIOLIB_DIR)/include -Isrc/qspi -DLIBRARY_BUILD=1
 
+# nandServerにリンクするオブジェクト
+$(QSPI_OBJ_DIR):
+	mkdir -p $(QSPI_OBJ_DIR)
+
+$(QSPI_OBJ_DIR)/w25n_pio.o: src/qspi/w25n_pio.c | $(QSPI_OBJ_DIR)
+	$(CC) $(QSPI_CFLAGS) -c $< -o $@
+
+$(QSPI_OBJ_DIR)/%.o: $(PIOLIB_DIR)/%.c | $(QSPI_OBJ_DIR)
+	$(CC) $(QSPI_CFLAGS) -c $< -o $@
+
 qspiTest: src/qspi/test_jedec.c src/qspi/w25n_pio.c $(PIOLIB_SRC)
 	$(CC) $(QSPI_CFLAGS) $^ -o $@
 
@@ -90,6 +106,11 @@ qspiSpeedTest: src/qspi/test_speed.c src/qspi/w25n_pio.c $(PIOLIB_SRC)
 
 qspiQuadTest: src/qspi/test_quad.c src/qspi/w25n_pio.c $(PIOLIB_SRC)
 	$(CC) $(QSPI_CFLAGS) $^ -o $@
+
+# SPI-NAND HAT実チップでのCPU統合テスト (sudo不要)
+testHw: test/test_hw.cpp src/server/ROM.cpp src/server/cpu.cpp \
+        src/server/gpiolib.cpp src/server/gpiochip_rp1.cpp src/server/util.cpp $(QSPI_OBJS)
+	$(CXX) $(CXXFLAGS) $(filter %.cpp,$^) $(QSPI_OBJS) -o $@ -lpthread
 
 # デバッグ用: PIOファームウェアの生存確認(全ioctlがETIMEDOUTなら要再起動)
 pioProbe: src/qspi/pio_probe.c
@@ -103,10 +124,13 @@ dbgShiftCfg: src/qspi/dbg_shiftcfg.c $(PIOLIB_SRC)
 dbgRxBulk: src/qspi/dbg_rxbulk.c $(PIOLIB_SRC)
 	$(CC) $(QSPI_CFLAGS) $^ -o $@
 
+# ヘッダ依存(.d)の取り込み (初回ビルド時は存在しないので-include)
+-include $(SUBLEQ_OBJ_FILES:.o=.d) $(SERVER_OBJ_FILES:.o=.d) $(CLIENT_OBJ_FILES:.o=.d)
+
 # クリーンアップ
 clean:
 	rm -rf $(BUILD_DIR)
-	rm -f $(TARGET) qspiTest qspiPageTest qspiSpeedTest qspiQuadTest pioProbe dbgShiftCfg dbgRxBulk
+	rm -f $(TARGET) qspiTest qspiPageTest qspiSpeedTest qspiQuadTest testHw pioProbe dbgShiftCfg dbgRxBulk
 
 # フォースターゲット指定
 .PHONY: all clean

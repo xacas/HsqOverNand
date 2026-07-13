@@ -23,3 +23,4 @@ build/
 
 # ローカル設定
 .claude/
+/testHw

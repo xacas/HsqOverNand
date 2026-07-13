@@ -39,15 +39,21 @@ class nandInterface {
 
 #else //NAND_STUB
 
+#include <string.h>
 #include "MTDFlashDevice.hpp"
+#include "W25NFlashDevice.hpp"
 #include "gpiolib.h"
 
 #undef DEBUG
 #define LED
 
+// デバイス指定:
+//   "/dev/mtdN"       MTD (nandsim等、カーネルドライバ経由)
+//   "hat:u2"/"hat:u3" SPI-NAND HAT ver.4のW25N02KVをRP1 PIOで直接制御
 class nandInterface {
     private:
-        MTDFlashDevice mtd;
+        MTDFlashDevice* mtd = nullptr;
+        W25NFlashDevice* hat = nullptr;
 #ifdef LED
         bool ledOk = false;
         unsigned int ledRead = 2;
@@ -64,9 +70,21 @@ class nandInterface {
 #endif
         }
     public:
-        nandInterface(const char* dev = "/dev/mtd0") : mtd(dev)
+        nandInterface(const char* dev = "/dev/mtd0")
         {
-            if (!mtd.open()) {
+            if(strncmp(dev, "hat:", 4) == 0)
+            {
+                hat = new W25NFlashDevice();
+                if(!hat->open(dev + 4))
+                {
+                    exit(1);
+                }
+                // 注意: LEDピン(GPIO2/3/4)はHATのU3バス(io3/clk)と衝突する
+                // ため、HAT使用時はLED表示を行わない(ledOk=falseのまま)
+                return;
+            }
+            mtd = new MTDFlashDevice(dev);
+            if (!mtd->open()) {
                 exit(1);
             }
 #ifdef LED
@@ -98,14 +116,23 @@ class nandInterface {
         }
         ~nandInterface()
         {
-            mtd.close();
+            if(hat)
+            {
+                hat->close();
+                delete hat;
+            }
+            if(mtd)
+            {
+                mtd->close();
+                delete mtd;
+            }
         }
         bool erase(uint32_t offset, uint32_t length)
         {
             bool status = false;
             led(ledErase, DRIVE_HIGH);
 
-            if(mtd.erase(offset, length))
+            if(hat ? hat->erase(offset, length) : mtd->erase(offset, length))
             {
 #ifdef DEBUG
                 std::cout << "Erase successful." << std::endl;
@@ -120,7 +147,7 @@ class nandInterface {
             bool status = false;
             led(ledRead, DRIVE_HIGH);
 
-            if (mtd.read(offset, buffer, length)) {
+            if (hat ? hat->read(offset, buffer, length) : mtd->read(offset, buffer, length)) {
 #ifdef DEBUG
                 std::cout << "Read successful. Data (hex):" << std::endl;
                 for (size_t i = 0; i < length; i++) {
@@ -143,7 +170,7 @@ class nandInterface {
 #ifdef DEBUG
             std::cout << "Writing " << length << " bytes..." << std::endl;
 #endif
-            if(mtd.write(offset, buffer, length))
+            if(hat ? hat->write(offset, buffer, length) : mtd->write(offset, buffer, length))
             {
 #ifdef DEBUG
                 std::cout << "Write successful." << std::endl;
@@ -155,7 +182,7 @@ class nandInterface {
         }
         uint32_t size()
         {
-            return mtd.getInfo().size;
+            return hat ? hat->size() : mtd->getInfo().size;
         }
 };
 

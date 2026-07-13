@@ -23,6 +23,13 @@ typedef struct {
 #define W25N_U2_PINS ((w25n_pins_t){ .cs = 21, .clk = 12, .io0 = 19, .io1 = 26, .io2 = 20, .io3 = 5, .sm = 1 })
 #define W25N_U3_PINS ((w25n_pins_t){ .cs = 27, .clk = 4,  .io0 = 15, .io1 = 17, .io2 = 18, .io3 = 2, .sm = 0 })
 
+// W25N02KVのジオメトリ (2Gbit、単一ダイ、ページアドレスは17bit連続)
+#define W25N_PAGE_SIZE   2048u
+#define W25N_BLOCK_PAGES 64u
+#define W25N_BLOCK_SIZE  (W25N_PAGE_SIZE * W25N_BLOCK_PAGES)        /* 128KB */
+#define W25N_NUM_BLOCKS  2048u
+#define W25N_TOTAL_SIZE  (W25N_BLOCK_SIZE * W25N_NUM_BLOCKS)        /* 256MB */
+
 typedef struct w25n_dev w25n_dev_t;
 
 // clkdiv: PIOクロック分周。SPIクロック = 200MHz / clkdiv / 2
@@ -55,9 +62,16 @@ int w25n_wait_busy(w25n_dev_t *d, unsigned timeout_us, uint8_t *sr3_out);
 // 128KBブロック消去 (D8h)。pageはブロック内任意のページ番号(17bit)
 int w25n_block_erase(w25n_dev_t *d, uint32_t page);
 
-// データバッファへロード(02h)→Program Execute(10h)→完了待ち。
-// 02hはバッファ全体をFFhにリセットしてからcol位置にlenバイト置く
+// データバッファへロード(既定はQuad Data Load 32h、W25N_NOQUADで02h)→
+// Program Execute(10h)→完了待ち。ロードはバッファ全体をFFhにリセットして
+// からcol位置にlenバイト置く
 int w25n_program(w25n_dev_t *d, uint32_t page, uint16_t col, const uint8_t *data, size_t len);
+
+// w25n_programの2分割版。beginがWrite Enable+データロード(x4送信を含む=
+// 他チップとの排他が必要)、commitがProgram Execute+完了待ち(x1のみ=
+// 他チップと並行可)。呼び出し側でロック粒度を変えたいとき用
+int w25n_program_begin(w25n_dev_t *d, uint16_t col, const uint8_t *data, size_t len);
+int w25n_program_commit(w25n_dev_t *d, uint32_t page);
 
 // Page Data Read (13h): ページをデータバッファへ読み込み、完了を待つ
 int w25n_page_read(w25n_dev_t *d, uint32_t page);

@@ -393,17 +393,31 @@ namespace Server {
         int server_fd;
         struct sockaddr_in server_addr;
 
-        // 接続されているフラッシュデバイス(/dev/mtd0..3)を検出し、
-        // 1デバイスにつき1CPUを立ち上げる(初期化はROM生成の共有状態のため逐次)
+        // フラッシュデバイスを検出し、1デバイスにつき1CPUを立ち上げる
+        // (初期化はROM生成の共有状態のため逐次)。
+        // SPI-NAND HAT (実チップ、sudo不要)があれば優先し、無ければ
+        // /dev/mtd0..3 (nandsim)。環境変数NAND_DEV=mtd|hatで強制切替できる
         std::vector<std::unique_ptr<CPU>> cpus;
-        for (int i = 0; i < MAX_MTD; i++) {
-            char dev[16];
-            snprintf(dev, sizeof(dev), "/dev/mtd%d", i);
-            if (access(dev, F_OK) != 0) {
-                break;
+        const char* pref = getenv("NAND_DEV");
+        bool allow_hat = !(pref && strcmp(pref, "mtd") == 0);
+        bool allow_mtd = !(pref && strcmp(pref, "hat") == 0);
+        if (allow_hat && W25NFlashDevice::probe()) {
+            const char* hats[] = { "hat:u2", "hat:u3" };
+            for (int i = 0; i < 2; i++) {
+                printf("CPU%d: %s (W25N02KV) を初期化中...\n", i, hats[i]);
+                cpus.emplace_back(new CPU(hats[i]));
             }
-            printf("CPU%d: %s を初期化中...\n", i, dev);
-            cpus.emplace_back(new CPU(dev));
+        }
+        if (cpus.empty() && allow_mtd) {
+            for (int i = 0; i < MAX_MTD; i++) {
+                char dev[16];
+                snprintf(dev, sizeof(dev), "/dev/mtd%d", i);
+                if (access(dev, F_OK) != 0) {
+                    break;
+                }
+                printf("CPU%d: %s を初期化中...\n", i, dev);
+                cpus.emplace_back(new CPU(dev));
+            }
         }
         if (cpus.empty()) {
             printf("フラッシュデバイスが見つかりません\n");

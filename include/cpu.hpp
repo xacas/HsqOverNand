@@ -38,16 +38,37 @@ class CPU
                 printf("rom_init overflow: %u words > ROM_SIZE\n", rom_size);
                 exit(1);
             }
-            nand.write(0, nand_internal, ROM_SIZE);
-
             // フラッシュ書込はANDのため、旧データが残っているとROMが壊れる。
-            // 読み戻して一致しなければ起動を中止する
+            // 事前に読み出し、目的のROMとも消去状態(全FF)とも違うデータが
+            // 残っていればROM領域を消去してから書く(実チップはrmmodの
+            // ような外部リセット手段が無いので自己修復する)。
+            // 同一ROMの再起動は書込が冪等(x AND x = x)なので消去しない
             uint8_t* verify = new uint8_t[ROM_SIZE];
             nand.read(0, verify, ROM_SIZE);
             if(memcmp(verify, nand_internal, ROM_SIZE) != 0)
             {
-                printf("ROM verify FAILED: フラッシュに旧データが残っています。"
-                       "nandsimを再ロードしてください(rmmod/modprobe = run.sh)\n");
+                bool blank = true;
+                for(size_t i = 0; i < ROM_SIZE && blank; i++)
+                {
+                    blank = (verify[i] == 0xff);
+                }
+                if(!blank)
+                {
+                    printf("%s: ROM領域に旧データが残っているため消去します\n", dev);
+                    if(!nand.erase(0, ROM_SIZE))
+                    {
+                        printf("ROM領域の消去に失敗\n");
+                        exit(1);
+                    }
+                }
+            }
+            nand.write(0, nand_internal, ROM_SIZE);
+
+            // 読み戻して一致しなければ起動を中止する(最終ガード)
+            nand.read(0, verify, ROM_SIZE);
+            if(memcmp(verify, nand_internal, ROM_SIZE) != 0)
+            {
+                printf("ROM verify FAILED: ROMの書込結果が一致しません\n");
                 exit(1);
             }
             delete[] verify;

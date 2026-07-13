@@ -625,11 +625,14 @@ static int load_data(w25n_dev_t *d, uint16_t col, const uint8_t *data, size_t le
     return rc;
 }
 
-int w25n_program(w25n_dev_t *d, uint32_t page, uint16_t col, const uint8_t *data, size_t len)
+int w25n_program_begin(w25n_dev_t *d, uint16_t col, const uint8_t *data, size_t len)
 {
     write_enable(d);
-    if (load_data(d, col, data, len) < 0)
-        return -1;
+    return load_data(d, col, data, len);
+}
+
+int w25n_program_commit(w25n_dev_t *d, uint32_t page)
+{
     const uint8_t exec[4] = { 0x10, page >> 16, page >> 8, page };
     w25n_cmd(d, exec, sizeof(exec), NULL, 0);
     uint8_t sr3;
@@ -640,6 +643,13 @@ int w25n_program(w25n_dev_t *d, uint32_t page, uint16_t col, const uint8_t *data
         return -1;
     }
     return 0;
+}
+
+int w25n_program(w25n_dev_t *d, uint32_t page, uint16_t col, const uint8_t *data, size_t len)
+{
+    if (w25n_program_begin(d, col, data, len) < 0)
+        return -1;
+    return w25n_program_commit(d, page);
 }
 
 int w25n_page_read(w25n_dev_t *d, uint32_t page)
