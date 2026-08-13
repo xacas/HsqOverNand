@@ -1,6 +1,7 @@
 # ビルド生成物
 build/
 *.o
+*.d
 
 # 実行バイナリ
 /subleq
@@ -16,6 +17,9 @@ build/
 /pioProbe
 /dbgShiftCfg
 /dbgRxBulk
+
+# HW SPI(spidev)非同期ドライバのベンチマーク
+/spiPipelineTest
 
 # hsqはビルド時に取得+パッチ適用で生成される(オリジナルは再配布しない)
 /hsq.cpp

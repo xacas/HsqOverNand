@@ -1,13 +1,17 @@
 # 変数定義
 CXX = g++
 # -MMD -MP: ヘッダ依存(.d)を生成し、ヘッダ変更時に.oを再ビルドさせる
-CXXFLAGS = -Wall -Iinclude -Isrc/qspi -std=c++14 -Ofast -I/usr/local/include -O3 -MMD -MP
+CXXFLAGS = -Wall -Iinclude -Isrc/qspi -Isrc/spi -std=c++14 -Ofast -I/usr/local/include -O3 -MMD -MP
 LIBS = `pkg-config --libs gtk+-3.0` -lpthread
 
 # SPI-NAND HAT用のPIOドライバ(C)。nandServerにリンクする
 QSPI_OBJ_DIR = build/qspi
 QSPI_OBJS = $(QSPI_OBJ_DIR)/w25n_pio.o $(QSPI_OBJ_DIR)/piolib.o \
             $(QSPI_OBJ_DIR)/library_piochips.o $(QSPI_OBJ_DIR)/pio_rp1.o
+
+# HW SPI(spidev)用の非同期W25N02KVドライバ(C)。nandServerにリンクする
+SPI_OBJ_DIR = build/spi
+SPI_OBJS = $(SPI_OBJ_DIR)/w25n_spidev.o
 SUBLEQ_SRC_DIR = src/subleq
 SERVER_SRC_DIR = src/server
 CLIENT_SRC_DIR = src/client
@@ -33,8 +37,8 @@ CLIENT_OBJ_FILES = $(patsubst $(CLIENT_SRC_DIR)/%.cpp, $(CLIENT_BUILD_DIR)/%.o, 
 all: $(TARGET)
 
 # ターゲットのリンク
-$(SERVER): $(SERVER_OBJ_FILES) $(QSPI_OBJS)
-	$(CXX) $(SERVER_OBJ_FILES) $(QSPI_OBJS) -o $(SERVER) $(LIBS)
+$(SERVER): $(SERVER_OBJ_FILES) $(QSPI_OBJS) $(SPI_OBJS)
+	$(CXX) $(SERVER_OBJ_FILES) $(QSPI_OBJS) $(SPI_OBJS) -o $(SERVER) $(LIBS)
 
 $(SUBLEQ): $(SUBLEQ_OBJ_FILES)
 	$(CXX) $(SUBLEQ_OBJ_FILES) -o $(SUBLEQ)
@@ -107,10 +111,25 @@ qspiSpeedTest: src/qspi/test_speed.c src/qspi/w25n_pio.c $(PIOLIB_SRC)
 qspiQuadTest: src/qspi/test_quad.c src/qspi/w25n_pio.c $(PIOLIB_SRC)
 	$(CC) $(QSPI_CFLAGS) $^ -o $@
 
+# HW SPI(spidev)による非同期W25N02KVドライバ
+$(SPI_OBJ_DIR):
+	mkdir -p $(SPI_OBJ_DIR)
+
+$(SPI_OBJ_DIR)/%.o: src/spi/%.c | $(SPI_OBJ_DIR)
+	$(CC) -Wall -O2 -Isrc/spi -c $< -o $@
+
+# HW SPIの疎通・往復・非同期パイプラインのベンチマーク
+# (実チップを破壊的に書き換える。不良ブロックマークをスキャンして
+# 良品ブロックを自動選択してから使用する)
+# w25n_spidev.cはC(calloc等の暗黙変換がC++では通らない)なのでgccでオブジェクト化してからリンクする
+# 例: ./spiPipelineTest /dev/spidev0.0 /dev/spidev1.0
+spiPipelineTest: src/spi/test_pipeline.cpp $(SPI_OBJS)
+	$(CXX) -Wall -O2 -std=c++14 -Iinclude -Isrc/spi $^ -o $@
+
 # SPI-NAND HAT実チップでのCPU統合テスト (sudo不要)
 testHw: test/test_hw.cpp src/server/ROM.cpp src/server/cpu.cpp \
-        src/server/gpiolib.cpp src/server/gpiochip_rp1.cpp src/server/util.cpp $(QSPI_OBJS)
-	$(CXX) $(CXXFLAGS) $(filter %.cpp,$^) $(QSPI_OBJS) -o $@ -lpthread
+        src/server/gpiolib.cpp src/server/gpiochip_rp1.cpp src/server/util.cpp $(QSPI_OBJS) $(SPI_OBJS)
+	$(CXX) $(CXXFLAGS) $(filter %.cpp,$^) $(QSPI_OBJS) $(SPI_OBJS) -o $@ -lpthread
 
 # デバッグ用: PIOファームウェアの生存確認(全ioctlがETIMEDOUTなら要再起動)
 pioProbe: src/qspi/pio_probe.c
@@ -130,7 +149,7 @@ dbgRxBulk: src/qspi/dbg_rxbulk.c $(PIOLIB_SRC)
 # クリーンアップ
 clean:
 	rm -rf $(BUILD_DIR)
-	rm -f $(TARGET) qspiTest qspiPageTest qspiSpeedTest qspiQuadTest testHw pioProbe dbgShiftCfg dbgRxBulk
+	rm -f $(TARGET) qspiTest qspiPageTest qspiSpeedTest qspiQuadTest testHw pioProbe dbgShiftCfg dbgRxBulk spiPipelineTest
 
 # フォースターゲット指定
 .PHONY: all clean

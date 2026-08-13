@@ -395,13 +395,38 @@ namespace Server {
 
         // フラッシュデバイスを検出し、1デバイスにつき1CPUを立ち上げる
         // (初期化はROM生成の共有状態のため逐次)。
-        // SPI-NAND HAT (実チップ、sudo不要)があれば優先し、無ければ
-        // /dev/mtd0..3 (nandsim)。環境変数NAND_DEV=mtd|hatで強制切替できる
+        // 優先順位: spi(NAND_SPI_DEVS指定時) > SPI-NAND HAT(実チップ、
+        // sudo不要、自動プローブ) > /dev/mtd0..3 (nandsim)。
+        // 環境変数NAND_DEV=mtd|hat|spiで強制切替できる。
+        //
+        // spiは1チップ=1nandInterface=1CPUで立ち上げる(hatのu2/u3と同じ
+        // 粒度)。W25NSpiFlashDeviceの複数チップ束ね(非同期Program
+        // パイプライン)は1論理デバイス内の複数ページ書き込みでのみ効く
+        // ([[nand-subleq-architecture]]の「1ラウンド1ページ」制約により
+        // SUBLEQのPRG_NANDは同一ページへの依存書き込みなので恩恵が無い)。
+        // 独立チップは束ねずCPUを分けたほうがラウンド単位の並列度が上がる
         std::vector<std::unique_ptr<CPU>> cpus;
         const char* pref = getenv("NAND_DEV");
-        bool allow_hat = !(pref && strcmp(pref, "mtd") == 0);
-        bool allow_mtd = !(pref && strcmp(pref, "hat") == 0);
-        if (allow_hat && W25NFlashDevice::probe()) {
+        bool allow_hat = !(pref && (strcmp(pref, "mtd") == 0 || strcmp(pref, "spi") == 0));
+        bool allow_mtd = !(pref && (strcmp(pref, "hat") == 0 || strcmp(pref, "spi") == 0));
+        bool allow_spi = !(pref && (strcmp(pref, "hat") == 0 || strcmp(pref, "mtd") == 0));
+        const char* spiDevs = allow_spi ? getenv("NAND_SPI_DEVS") : nullptr;
+        if (spiDevs) {
+            uint32_t hz = 20000000;
+            if (const char* e = getenv("W25N_SPI_HZ")) {
+                hz = (uint32_t)strtoul(e, nullptr, 10);
+            }
+            for (const auto& path : nandInterface_splitCsv(spiDevs)) {
+                if (!W25NSpiFlashDevice::probe(path, hz)) {
+                    fprintf(stderr, "spi:%s は応答なし、スキップします\n", path.c_str());
+                    continue;
+                }
+                std::string dev = "spi:" + path;
+                printf("CPU%zu: %s (HW SPI) を初期化中...\n", cpus.size(), dev.c_str());
+                cpus.emplace_back(new CPU(dev.c_str()));
+            }
+        }
+        if (cpus.empty() && allow_hat && W25NFlashDevice::probe()) {
             const char* hats[] = { "hat:u2", "hat:u3" };
             for (int i = 0; i < 2; i++) {
                 printf("CPU%d: %s (W25N02KV) を初期化中...\n", i, hats[i]);

@@ -27,6 +27,16 @@ HSQソース(.hsq) → hsq → SUBLEQコード(.sq) → subleq(インタプリ�
   同一 UDP ソケットを共有するためクライアントは無変更。4 デバイス × 2 レーン
   で最大 8 並列減算。相乗り待ちはアクティブクライアント数が CPU 数を超えた
   ときだけ行う
+- **HW SPI(spidev)ドライバ**: W25N02KV を Linux の spidev(RP1 の実 SPI
+  ペリフェラル)経由で直接制御する。RP1 PIO による自前 QSPI ビットバング
+  (`src/qspi/`)は実測で HW 単体 SPI より遅かったため、新規チップは
+  `src/spi/`(spidev + 非同期 Program)を使う。Program 実行(10h)はコマンド
+  送信後 BUSY 待ちせずに戻る(`issue`/`wait` 分割)ため、同一物理バスを
+  共有する複数チップに対して「あるチップの Program 中(最大 tPP=700us)に
+  別チップへコマンドを送る」ことでバスのアイドルを減らせる
+  (`include/W25NSpiFlashDevice.hpp`)。ただし SUBLEQ の 1 ラウンドは同一
+  ページへの依存した AND の積み重ねなのでチップ内ではパイプライン化でき
+  ず、恩恵が出るのは独立チップ間(既存のマルチフラッシュ並列と同じ形)
 - **ウェアレベリング**: ラウンド毎に物理ページを 1 つ進め、全容量
   (2Gbit なら 130,752 ページ)を使い切ったときだけブロックを一括消去する
 
@@ -50,6 +60,27 @@ make hsq        # Higher Subleq コンパイラ
 AND 合成で壊れるため nandsim の再ロード(run.sh)が必要。nandServer は起動時に
 ROM を読み戻して検証し、不一致なら `ROM verify FAILED` で終了する。
 
+### HW SPI(spidev)でのNANDデバイス指定
+
+W25N02KV(等)を Linux の spidev 経由で使うには、チップを RP1 の実 SPI
+ペリフェラル固定ピンに配線する(SPI0: GPIO7-11 の CE1/CE0/MISO/MOSI/SCLK、
+SPI1: GPIO16-21 の CE0-2/MISO/MOSI/SCLK)。spidev のデバイスノードが
+`/dev/spidevB.C` として現れたら、環境変数で nandServer に伝える:
+
+```sh
+NAND_DEV=spi NAND_SPI_DEVS=/dev/spidev0.0,/dev/spidev0.1 ./nandServer
+```
+
+チップ 1 個ごとに 1 nandInterface(=1 CPU ワーカー)を立ち上げる(HAT の
+`hat:u2`/`hat:u3` と同じ粒度)。SPI クロックは `W25N_SPI_HZ`(既定
+20MHz、要実機での実測調整)で指定する。`spiPipelineTest` (`make
+spiPipelineTest`) で疎通確認・AND 特性検証・非同期 Program の効果測定が
+できる:
+
+```sh
+./spiPipelineTest /dev/spidev0.0 /dev/spidev0.1
+```
+
 ## 検証
 
 ハードウェア無しでネットリストを検証できる(インメモリNANDスタブ):
@@ -68,7 +99,9 @@ g++ -O2 -DNAND_STUB -Iinclude src/server/ROM.cpp src/server/cpu.cpp \
 | `src/server/` | nandServer: マイクロコードROM生成(CLA)、CPU、UDPサーバ |
 | `src/subleq/` | SUBLEQインタプリタ(減算をnandServerへオフロード) |
 | `src/client/` | simpleClient: 減算の回帰テスト |
-| `include/` | 共有ヘッダ(ROM/CPU/NANDインタフェース/MTD) |
+| `src/qspi/` | SPI-NAND HAT ver.4向けRP1 PIOドライバ(x1+x4、参考実装) |
+| `src/spi/` | HW SPI(spidev)向け非同期W25N02KVドライバ(現行) |
+| `include/` | 共有ヘッダ(ROM/CPU/NANDインタフェース/MTD/W25N) |
 | `hsq64.patch` | Higher Subleq コンパイラを64bit化するパッチ(本体はビルド時取得) |
 | `hsq_src/`, `test/` | HSQサンプルとテストハーネス |
 | `hw/` | 回路図(キャリー先見加算器) |

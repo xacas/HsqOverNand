@@ -40,20 +40,47 @@ class nandInterface {
 #else //NAND_STUB
 
 #include <string.h>
+#include <stdlib.h>
+#include <string>
+#include <vector>
 #include "MTDFlashDevice.hpp"
 #include "W25NFlashDevice.hpp"
+#include "W25NSpiFlashDevice.hpp"
 #include "gpiolib.h"
 
 #undef DEBUG
 #define LED
 
+// カンマ区切りの/dev/spidevパス列を分割する ("spi:"バックエンド用)
+static std::vector<std::string> nandInterface_splitCsv(const char* s)
+{
+    std::vector<std::string> out;
+    std::string cur;
+    for (const char* p = s; ; p++) {
+        if (*p == ',' || *p == '\0') {
+            if (!cur.empty()) out.push_back(cur);
+            cur.clear();
+            if (*p == '\0') break;
+        } else {
+            cur += *p;
+        }
+    }
+    return out;
+}
+
 // デバイス指定:
-//   "/dev/mtdN"       MTD (nandsim等、カーネルドライバ経由)
-//   "hat:u2"/"hat:u3" SPI-NAND HAT ver.4のW25N02KVをRP1 PIOで直接制御
+//   "/dev/mtdN"          MTD (nandsim等、カーネルドライバ経由)
+//   "hat:u2"/"hat:u3"    SPI-NAND HAT ver.4のW25N02KVをRP1 PIOで直接制御
+//   "spi:/dev/spidevB.C[,/dev/spidevB2.C2,...]"
+//                        W25N02KV(等)をLinuxのspidev(HWのSPIペリフェラル)
+//                        経由で直接制御。複数チップを束ねると非同期
+//                        Program(W25NSpiFlashDevice参照)でスループットが
+//                        上がる。速度は環境変数W25N_SPI_HZで指定(既定20MHz)
 class nandInterface {
     private:
         MTDFlashDevice* mtd = nullptr;
         W25NFlashDevice* hat = nullptr;
+        W25NSpiFlashDevice* spi = nullptr;
 #ifdef LED
         bool ledOk = false;
         unsigned int ledRead = 2;
@@ -83,9 +110,27 @@ class nandInterface {
                 // ため、HAT使用時はLED表示を行わない(ledOk=falseのまま)
                 return;
             }
-            mtd = new MTDFlashDevice(dev);
-            if (!mtd->open()) {
-                exit(1);
+            if(strncmp(dev, "spi:", 4) == 0)
+            {
+                spi = new W25NSpiFlashDevice();
+                uint32_t hz = 20000000;  /* 要実測調整。まず保守的な値で確認 */
+                if(const char* e = getenv("W25N_SPI_HZ"))
+                {
+                    hz = (uint32_t)strtoul(e, nullptr, 10);
+                }
+                if(!spi->open(nandInterface_splitCsv(dev + 4), hz))
+                {
+                    exit(1);
+                }
+                // 標準SPI0/SPI1のピン(GPIO7-11 / 16-21)はLEDピン(GPIO2-4)と
+                // 衝突しないため、HATと異なりLED表示を継続する
+            }
+            else
+            {
+                mtd = new MTDFlashDevice(dev);
+                if (!mtd->open()) {
+                    exit(1);
+                }
             }
 #ifdef LED
             // GPIO初期化は全デバイス(CPU)で共有する(LEDピンは共通の稼働表示)。
@@ -121,6 +166,11 @@ class nandInterface {
                 hat->close();
                 delete hat;
             }
+            if(spi)
+            {
+                spi->close();
+                delete spi;
+            }
             if(mtd)
             {
                 mtd->close();
@@ -132,7 +182,7 @@ class nandInterface {
             bool status = false;
             led(ledErase, DRIVE_HIGH);
 
-            if(hat ? hat->erase(offset, length) : mtd->erase(offset, length))
+            if(hat ? hat->erase(offset, length) : spi ? spi->erase(offset, length) : mtd->erase(offset, length))
             {
 #ifdef DEBUG
                 std::cout << "Erase successful." << std::endl;
@@ -147,7 +197,7 @@ class nandInterface {
             bool status = false;
             led(ledRead, DRIVE_HIGH);
 
-            if (hat ? hat->read(offset, buffer, length) : mtd->read(offset, buffer, length)) {
+            if (hat ? hat->read(offset, buffer, length) : spi ? spi->read(offset, buffer, length) : mtd->read(offset, buffer, length)) {
 #ifdef DEBUG
                 std::cout << "Read successful. Data (hex):" << std::endl;
                 for (size_t i = 0; i < length; i++) {
@@ -170,7 +220,7 @@ class nandInterface {
 #ifdef DEBUG
             std::cout << "Writing " << length << " bytes..." << std::endl;
 #endif
-            if(hat ? hat->write(offset, buffer, length) : mtd->write(offset, buffer, length))
+            if(hat ? hat->write(offset, buffer, length) : spi ? spi->write(offset, buffer, length) : mtd->write(offset, buffer, length))
             {
 #ifdef DEBUG
                 std::cout << "Write successful." << std::endl;
@@ -182,7 +232,7 @@ class nandInterface {
         }
         uint32_t size()
         {
-            return hat ? hat->size() : mtd->getInfo().size;
+            return hat ? hat->size() : spi ? spi->size() : mtd->getInfo().size;
         }
 };
 
