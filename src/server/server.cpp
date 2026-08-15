@@ -356,8 +356,21 @@ namespace Server {
             printf("CPU%d 受信[%d/%d]: a = %20ld, b = %20ld, 計算: c = %20ld, c <= 0 ? : %s\n",
                    w.id, i + 1, n, p[i].req.a, p[i].req.b, resp[i].c,
                    (resp[i].is_non_positive) ? "true" : "false");
-            ssize_t bytes_sent = sendto(server_fd, &resp[i], sizeof(Response), 0,
-                                       (struct sockaddr*)&p[i].addr, p[i].len);
+            // 送信バッファ一時逼迫(EAGAIN/ENOBUFS)やEINTRは一過性のことが多いので
+            // 数回だけ即座にリトライする。それでも失敗する場合はクライアント側の
+            // タイムアウト・再送(client.hpp)に委ねる
+            constexpr int SEND_RETRIES = 3;
+            ssize_t bytes_sent = -1;
+            for (int attempt = 0; attempt <= SEND_RETRIES; attempt++) {
+                bytes_sent = sendto(server_fd, &resp[i], sizeof(Response), 0,
+                                   (struct sockaddr*)&p[i].addr, p[i].len);
+                if (bytes_sent == sizeof(Response)) break;
+                if (attempt < SEND_RETRIES &&
+                    (errno == EAGAIN || errno == EWOULDBLOCK || errno == ENOBUFS || errno == EINTR)) {
+                    continue;
+                }
+                break;
+            }
             if (bytes_sent != sizeof(Response)) {
                 std::cout << "応答送信エラー: 送信サイズ " << bytes_sent << " bytes" << std::endl;
             }
