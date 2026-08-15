@@ -19,10 +19,23 @@ struct Response {
 };
 
 Response flashClient(Request req) {
-    // ソケットは再利用する。送信元ポートを固定することで、サーバ側が
-    // クライアントを同定でき、複数VM実行時の相乗りバッチングが機能する
-    static int sock = -1;
-    static struct sockaddr_in serv_addr;
+    // ソケットはスレッド毎に1個、再利用する。送信元ポートをスレッド単位で
+    // 固定することで、サーバ側がクライアント(スレッド)を同定でき、複数
+    // VM/複数スレッド実行時の相乗りバッチングが機能する。
+    // thread_localにしているのが重要: これがただのstaticだと、呼び出し元が
+    // OpenMP等でマルチスレッド化された場合に全スレッドが同一ソケットを
+    // 共有してしまう。UDPソケットはリクエスト/レスポンスの対応関係を
+    // 追跡しないため、スレッドAが送ったリクエストの応答をスレッドBの
+    // recvfrom()が先に奪ってしまう(取り違え)ことがあり得る。奪われた
+    // スレッドは自分宛の応答が二度と来ないため、リトライ無しの旧実装では
+    // recvfrom()が永久にブロックして見かけ上「通信が途切れる」形で
+    // ハングし、リトライ導入後は空振りタイムアウト→再送が起きて
+    // 送信数が増え、取り違えの頻度も雪だるま式に増えて「最初から
+    // タイムアウト頻発」になっていた。thread_local化によりスレッド毎に
+    // 別ソケット(別送信元ポート)になるため、この取り違えは原理的に
+    // 起こらない
+    thread_local int sock = -1;
+    thread_local struct sockaddr_in serv_addr;
 
     // UDPはパケットロスがあり得る(特に別マシン越しの実運用)ため、
     // 応答が一定時間来なければ同じリクエストを再送する。
@@ -62,7 +75,11 @@ Response flashClient(Request req) {
     }
 
     Response resp;
-    socklen_t addr_len = sizeof(serv_addr);
+    // recvfromの送信元アドレスはserv_addrとは別変数で受ける。
+    // serv_addrに直接書き込むと(旧実装のバグ)、以後のsendto先が
+    // 応答パケットの送信元アドレスで上書きされてしまう
+    struct sockaddr_in from_addr;
+    socklen_t addr_len;
 
     for (int attempt = 0; ; attempt++) {
         // UDPでデータ送信(リトライ時は同一リクエストを再送。サーバ側の計算は
@@ -82,8 +99,9 @@ Response flashClient(Request req) {
         //std::cout << "データを送信しました: a=" << req.a << ", b=" << req.b << std::endl;
 
         // UDPで結果受信(SO_RCVTIMEOによりtimeout_msでタイムアウトする)
+        addr_len = sizeof(from_addr);
         ssize_t bytes_received = recvfrom(sock, &resp, sizeof(resp), 0,
-                                         (struct sockaddr*)&serv_addr, &addr_len);
+                                         (struct sockaddr*)&from_addr, &addr_len);
 
         if (bytes_received == sizeof(resp)) {
             #if 0
